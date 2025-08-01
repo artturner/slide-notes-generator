@@ -1,12 +1,32 @@
 from typing import List, Dict, Any, Optional
 import re
 from datetime import datetime
+from grok_client import GrokClient
 
 class NotesGenerator:
-    def __init__(self, use_ai: bool = False, ai_api_key: Optional[str] = None):
-        self.use_ai = use_ai
-        self.ai_api_key = ai_api_key
+    def __init__(self, use_grok: bool = False, grok_api_key: Optional[str] = None, grok_model: str = "grok-beta"):
+        self.use_grok = use_grok
+        self.grok_api_key = grok_api_key
+        self.grok_model = grok_model
         self.templates = self._load_templates()
+        
+        # Initialize Grok client if enabled
+        self.grok_client = None
+        if self.use_grok:
+            try:
+                self.grok_client = GrokClient(api_key=grok_api_key, model=grok_model)
+                # Test connection
+                test_result = self.grok_client.test_connection()
+                if not test_result['success']:
+                    print(f"Warning: Grok connection test failed: {test_result.get('error', 'Unknown error')}")
+                    print("Falling back to built-in notes generation...")
+                    self.use_grok = False
+                else:
+                    print(f"✓ Grok API connected successfully using model: {grok_model}")
+            except Exception as e:
+                print(f"Warning: Failed to initialize Grok client: {e}")
+                print("Falling back to built-in notes generation...")
+                self.use_grok = False
         
     def _load_templates(self) -> Dict[str, str]:
         return {
@@ -21,6 +41,76 @@ class NotesGenerator:
     
     def generate_slide_notes(self, slide_content: Dict[str, Any], 
                            aligned_sections: List[Dict[str, Any]]) -> str:
+        
+        # Use Grok if enabled and available
+        if self.use_grok and self.grok_client:
+            return self._generate_grok_notes(slide_content, aligned_sections)
+        
+        # Fallback to original method
+        return self._generate_traditional_notes(slide_content, aligned_sections)
+    
+    def _generate_grok_notes(self, slide_content: Dict[str, Any], 
+                           aligned_sections: List[Dict[str, Any]]) -> str:
+        """Generate notes using Grok API"""
+        
+        # Prepare slide content for Grok
+        slide_title = slide_content.get('title', f"Slide {slide_content.get('slide_number', 'Unknown')}")
+        
+        # Format slide content
+        content_parts = []
+        if slide_content.get('text_content'):
+            for text in slide_content['text_content']:
+                if text.strip() and text != slide_title:
+                    content_parts.append(text.strip())
+        
+        if slide_content.get('bullet_points'):
+            for point in slide_content['bullet_points']:
+                if point.strip():
+                    content_parts.append(f"• {point.strip()}")
+        
+        slide_content_text = '\n'.join(content_parts)
+        
+        # Prepare textbook context
+        textbook_context = ""
+        if aligned_sections:
+            # Get the best matching sections
+            context_parts = []
+            for section in aligned_sections[:2]:  # Top 2 matches
+                if section.get('content'):
+                    context_parts.append(f"Section: {section.get('title', 'Unknown')}")
+                    context_parts.append(section['content'][:1000])  # Limit context length
+            textbook_context = '\n\n'.join(context_parts)
+        
+        # Generate notes using Grok
+        result = self.grok_client.generate_slide_notes(
+            slide_content=slide_content_text,
+            slide_title=slide_title,
+            textbook_context=textbook_context
+        )
+        
+        if result['success']:
+            # Format the Grok response into our template structure
+            grok_notes = result['notes']
+            
+            # Create slide header
+            slide_header = self.templates['slide_header'].format(
+                slide_number=slide_content.get('slide_number', 'Unknown'),
+                title=slide_title
+            )
+            
+            # Add processing info as comment (optional)
+            processing_info = f"<!-- Generated using {result.get('model', 'Grok')} in {result.get('processing_time', 0):.2f}s -->\n"
+            
+            return slide_header + processing_info + grok_notes + "\n\n"
+        else:
+            # Fallback to traditional method if Grok fails
+            print(f"Warning: Grok generation failed for {slide_title}: {result.get('error', 'Unknown error')}")
+            print("Falling back to built-in generation...")
+            return self._generate_traditional_notes(slide_content, aligned_sections)
+    
+    def _generate_traditional_notes(self, slide_content: Dict[str, Any], 
+                                  aligned_sections: List[Dict[str, Any]]) -> str:
+        """Original notes generation method"""
         notes_parts = []
         
         # Slide header

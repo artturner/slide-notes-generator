@@ -12,18 +12,25 @@ from content_aligner import ContentAligner
 from notes_generator import NotesGenerator
 from output_formatter import OutputFormatter
 from error_handler import ErrorHandler, SlideNotesError
+from pptx_notes_writer import PowerPointNotesWriter
 
 class SlideNotesGenerator:
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, use_grok: bool = False, grok_api_key: str = None, grok_model: str = "grok-beta"):
         self.verbose = verbose
+        self.use_grok = use_grok
         self.error_handler = ErrorHandler()
         
         # Initialize components
         self.slide_extractor = None
         self.textbook_parser = None
         self.content_aligner = ContentAligner()
-        self.notes_generator = NotesGenerator()
+        self.notes_generator = NotesGenerator(
+            use_grok=use_grok,
+            grok_api_key=grok_api_key,
+            grok_model=grok_model
+        )
         self.output_formatter = OutputFormatter()
+        self.pptx_notes_writer = PowerPointNotesWriter()
         
         # Progress tracking
         self.total_steps = 6
@@ -257,7 +264,7 @@ Examples:
                        help='Output file path (required unless using -m)')
     
     parser.add_argument('-f', '--format', 
-                       choices=['markdown', 'html', 'json', 'txt', 'csv'],
+                       choices=['markdown', 'html', 'json', 'txt', 'csv', 'plaintext'],
                        default='markdown',
                        help='Output format (default: markdown)')
     
@@ -273,10 +280,33 @@ Examples:
                        action='store_true',
                        help='Check required dependencies and exit')
     
+    parser.add_argument('--use-grok', 
+                       action='store_true',
+                       help='Use xAI Grok API for generating notes')
+    
+    parser.add_argument('--grok-api-key',
+                       help='xAI Grok API key (or set XAI_API_KEY env var)')
+    
+    parser.add_argument('--grok-model',
+                       default='grok-beta',
+                       help='Grok model to use (default: grok-beta)')
+    
+    parser.add_argument('--write-to-pptx',
+                       action='store_true',
+                       help='Write generated notes to PowerPoint slide notes sections')
+    
+    parser.add_argument('--pptx-output',
+                       help='Output path for PowerPoint file with notes (if not specified, overwrites original)')
+    
     args = parser.parse_args()
     
     # Initialize generator
-    generator = SlideNotesGenerator(verbose=args.verbose)
+    generator = SlideNotesGenerator(
+        verbose=args.verbose,
+        use_grok=args.use_grok,
+        grok_api_key=args.grok_api_key,
+        grok_model=args.grok_model
+    )
     
     # Check dependencies if requested
     if args.check_deps:
@@ -284,15 +314,15 @@ Examples:
         deps = generator.error_handler.check_dependencies()
         
         if deps['critical_missing']:
-            print("❌ Critical dependencies missing:")
+            print("Critical dependencies missing:")
             for pkg in deps['missing_packages']:
                 print(f"    - {pkg}")
             print("\nInstall missing packages with: pip install -r requirements.txt")
             sys.exit(1)
         else:
-            print("✅ All critical dependencies available")
+            print("All critical dependencies available")
             if deps['missing_packages']:
-                print("⚠️  Optional dependencies missing:")
+                print("Optional dependencies missing:")
                 for pkg in deps['missing_packages']:
                     print(f"    - {pkg}")
             sys.exit(0)
@@ -315,14 +345,18 @@ Examples:
         print(f"Error: Textbook file not found: {args.textbook}")
         sys.exit(1)
     
-    print("🔄 Starting slide notes generation...")
-    print(f"📊 Presentation: {args.presentation}")
-    print(f"📚 Textbook: {args.textbook}")
+    print("Starting slide notes generation...")
+    print(f"Presentation: {args.presentation}")
+    print(f"Textbook: {args.textbook}")
+    if args.use_grok:
+        print(f"Using Grok API with model: {args.grok_model}")
+    else:
+        print("Using built-in notes generation")
     
     try:
         if args.multiple_formats:
             # Generate multiple formats
-            print(f"📁 Output directory: {args.multiple_formats}")
+            print(f"Output directory: {args.multiple_formats}")
             
             base_filename = os.path.splitext(os.path.basename(args.presentation))[0] + "_notes"
             result = generator.generate_multiple_formats(
@@ -333,22 +367,22 @@ Examples:
             )
             
             if result['success']:
-                print("✅ Successfully generated notes in multiple formats!")
-                print("\n📄 Generated files:")
+                print("Successfully generated notes in multiple formats!")
+                print("\nGenerated files:")
                 for format_type, file_path in result['output_files'].items():
                     if not file_path.startswith('Error'):
                         print(f"    {format_type}: {file_path}")
                     else:
                         print(f"    {format_type}: {file_path}")
             else:
-                print("❌ Failed to generate notes:")
+                print("Failed to generate notes:")
                 for error in result['errors']:
                     print(f"    • {error}")
                 sys.exit(1)
                 
         else:
             # Generate single format
-            print(f"📝 Output: {args.output} ({args.format})")
+            print(f"Output: {args.output} ({args.format})")
             
             result = generator.generate_notes(
                 args.presentation,
@@ -358,29 +392,69 @@ Examples:
             )
             
             if result['success']:
-                print("✅ Successfully generated slide notes!")
-                print(f"\n📊 Statistics:")
+                print("Successfully generated slide notes!")
+                print(f"\nStatistics:")
                 print(f"    • Total slides: {result['metadata']['total_slides']}")
                 print(f"    • Textbook sections: {result['metadata']['textbook_sections']}")
                 print(f"    • Alignment rate: {result['metadata']['alignment_rate']}")
                 print(f"    • Processing time: {result['processing_time']}")
                 
                 if result['warnings']:
-                    print(f"\n⚠️  Warnings:")
+                    print(f"\nWarnings:")
                     for warning in result['warnings']:
                         print(f"    • {warning}")
+                
+                # Write notes to PowerPoint if requested
+                if args.write_to_pptx:
+                    print(f"\nWriting notes to PowerPoint file...")
+                    
+                    # Read the generated notes content
+                    try:
+                        # Determine actual output path with extension
+                        actual_output_path = args.output
+                        extension_map = {
+                            'markdown': '.md',
+                            'html': '.html',
+                            'json': '.json',
+                            'txt': '.txt',
+                            'csv': '.csv',
+                            'plaintext': '.txt'
+                        }
+                        
+                        if args.format in extension_map:
+                            expected_ext = extension_map[args.format]
+                            if not actual_output_path.lower().endswith(expected_ext):
+                                actual_output_path += expected_ext
+                        
+                        with open(actual_output_path, 'r', encoding='utf-8') as f:
+                            notes_content = f.read()
+                        
+                        pptx_result = generator.pptx_notes_writer.write_notes_to_pptx(
+                            args.presentation,
+                            notes_content,
+                            args.pptx_output
+                        )
+                        
+                        if pptx_result['success']:
+                            print(f"    • {pptx_result['message']}")
+                            print(f"    • PowerPoint file: {pptx_result['output_path']}")
+                        else:
+                            print(f"    • Failed to write to PowerPoint: {pptx_result['error']}")
+                            
+                    except Exception as e:
+                        print(f"    • Error writing to PowerPoint: {e}")
                         
             else:
-                print("❌ Failed to generate notes:")
+                print("Failed to generate notes:")
                 for error in result['errors']:
                     print(f"    • {error}")
                 sys.exit(1)
     
     except KeyboardInterrupt:
-        print("\n🛑 Process interrupted by user")
+        print("\nProcess interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()
