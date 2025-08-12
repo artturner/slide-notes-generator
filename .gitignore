@@ -64,7 +64,34 @@ Thumbs.db
 *.log
 *.sqlite3
 
-# Local secrets
+# Local secrets and API keys
 *.pem
 *.key
 *.crt
+.env
+config.json
+secrets.json
+
+# Project-specific exclusions
+# PDF files (potentially copyrighted textbooks)
+*.pdf
+
+# PowerPoint files (generated output)
+*.pptx
+*.ppt
+
+# Large generated markdown files (can be regenerated)
+*_generated.md
+*_generated_content*.md
+*_ai_generated.md
+*_fallback_generated.md
+
+# Test and temporary files
+test_*.py
+temp_*
+*.tmp
+
+# Output directories
+output/
+generated/
+exports/

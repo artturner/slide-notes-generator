@@ -149,6 +149,82 @@ Please generate detailed notes following the specified format."""
                 'slide_title': slide_title
             }
     
+    def generate_slide_content(self, topic: str, textbook_context: str = "") -> Dict[str, Any]:
+        """
+        Generate bullet point content for slides (NOT notes) using Grok
+        This method is specifically for generating slide content bullets, not detailed notes
+        
+        Args:
+            topic: The slide topic/title
+            textbook_context: Relevant textbook content for context
+        
+        Returns:
+            Dict with generated content and metadata
+        """
+        
+        # Create a content-specific prompt that explicitly avoids Roman numerals
+        content_prompt = f"""You are an expert instructional designer creating slide content for educational presentations. Your task is to generate bullet points with these constraints: maximum 13 words per bullet point and maximum 6 bullet points per topic.
+
+STRICT REQUIREMENTS:
+1. Each bullet point must be EXACTLY 13 words or fewer
+2. Maximum 6 bullet points total
+3. Focus on the most important concepts from the topic
+4. Use clear, educational language
+5. Make each bullet point informative and stand alone
+6. Use ONLY simple bullet points with dashes (-), NOT Roman numerals (I, II, III) or numbered lists
+7. Avoid overly technical jargon unless necessary
+8. Do NOT use any Roman numerals, letters, or complex formatting
+9. Each line should start with a simple dash (-)
+
+Topic: {topic}
+
+Textbook Context (for reference):
+{textbook_context[:2000] if textbook_context else "No textbook context provided"}
+
+Generate bullet points that capture the essential concepts for this topic. Each bullet should be a clear, educational phrase of 13 words maximum. Focus on key concepts, processes, definitions, or important facts that students need to understand.
+
+Format your response EXACTLY like this example (use simple dashes, no Roman numerals):
+- Core concept explanation with relevant educational details
+- Important process or method students should understand  
+- Key definition or terminology for this topic
+- Practical application or real-world example
+- Critical relationship between concepts
+- Essential takeaway for student learning
+
+IMPORTANT: Do not use Roman numerals (I, II, III), letters (A, B, C), or numbers (1, 2, 3). Use only simple dashes (-) at the start of each line."""
+
+        try:
+            start_time = time.time()
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": content_prompt}
+                ],
+                max_tokens=1500,
+                temperature=0.2,  # Lower temperature for more consistent formatting
+                top_p=0.8
+            )
+            
+            processing_time = time.time() - start_time
+            
+            return {
+                'success': True,
+                'content': response.choices[0].message.content,
+                'topic': topic,
+                'processing_time': processing_time,
+                'usage': response.usage.model_dump() if response.usage else None,
+                'model': self.model
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'topic': topic
+            }
+    
     def generate_batch_notes(self, slides_data: List[Dict[str, Any]], 
                            textbook_context: str = "") -> Dict[str, Any]:
         """
