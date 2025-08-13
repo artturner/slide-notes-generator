@@ -35,20 +35,59 @@ class OpenAIClient:
         if not self.api_key:
             raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass api_key parameter.")
         
-        # Configure OpenAI
-        self.client = openai.OpenAI(api_key=self.api_key)
+        # Configure OpenAI with timeout based on model
+        timeout = self._get_timeout_for_model(model)
+        self.client = openai.OpenAI(api_key=self.api_key, timeout=timeout)
+        
+        # Set model-specific temperature values
+        self.temperature = self._get_temperature_for_model(model)
+    
+    def _get_timeout_for_model(self, model: str) -> float:
+        """
+        Get appropriate timeout value based on model
+        
+        Args:
+            model: OpenAI model name
+            
+        Returns:
+            Timeout value in seconds
+        """
+        # All models use standard timeout
+        return 60.0  # 1 minute for all models
+    
+    def _get_temperature_for_model(self, model: str) -> float:
+        """
+        Get appropriate temperature value based on model
+        
+        Args:
+            model: OpenAI model name
+            
+        Returns:
+            Temperature value compatible with the model
+        """
+        # GPT-5 models only support default temperature of 1.0
+        if model.startswith('gpt-5'):
+            return 1.0
+        
+        # Other models support custom temperature values
+        return 0.3
     
     def test_connection(self) -> Dict[str, Any]:
         """Test API connection and return status"""
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "user", "content": "Hello, can you confirm you're working? Just respond with 'Yes'."}
-                ],
-                max_tokens=10,
-                temperature=0.1
-            )
+            # Prepare API call parameters
+            api_params = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": "Hello, can you confirm you're working? Just respond with 'Yes'."}],
+                "max_completion_tokens": 10,
+                "temperature": self.temperature
+            }
+            
+            # GPT-5 models don't support top_p parameter
+            if not self.model_name.startswith('gpt-5'):
+                api_params["top_p"] = 0.8
+            
+            response = self.client.chat.completions.create(**api_params)
             
             return {
                 'success': True,
@@ -57,10 +96,18 @@ class OpenAIClient:
             }
             
         except Exception as e:
+            error_msg = str(e)
+            error_type = type(e).__name__
+            
+            # Check for timeout-related errors
+            if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower():
+                error_msg = f"Connection test timed out after {self._get_timeout_for_model(self.model_name)}s"
+                error_type = "TimeoutError"
+            
             return {
                 'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__
+                'error': error_msg,
+                'error_type': error_type
             }
     
     def generate_bullet_points(self, section_content: str, heading: str, 
@@ -116,20 +163,26 @@ Generate the bullet points now:"""
             
             # Debug logging
             print(f"\n--- DEBUG: OpenAI prompt for '{heading}' ---")
+            print(f"Model: {self.model_name}")
             print(f"Content length: {len(section_content)} characters")
             print(f"Content preview: {section_content[:200]}...")
             print(f"Full prompt length: {len(prompt)} characters")
+            print(f"Timeout: {self._get_timeout_for_model(self.model_name)}s")
             print("--- END DEBUG ---\n")
             
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1024,
-                temperature=0.3,
-                top_p=0.8
-            )
+            # Prepare API call parameters
+            api_params = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_completion_tokens": 1024,
+                "temperature": self.temperature
+            }
+            
+            # GPT-5 models don't support top_p parameter
+            if not self.model_name.startswith('gpt-5'):
+                api_params["top_p"] = 0.8
+            
+            response = self.client.chat.completions.create(**api_params)
             
             processing_time = time.time() - start_time
             
@@ -168,11 +221,20 @@ Generate the bullet points now:"""
             }
             
         except Exception as e:
+            error_msg = str(e)
+            error_type = type(e).__name__
+            
+            # Check for timeout-related errors
+            if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower():
+                error_msg = f"Request timed out after {self._get_timeout_for_model(self.model_name)}s"
+                error_type = "TimeoutError"
+            
             return {
                 'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__,
-                'heading': heading
+                'error': error_msg,
+                'error_type': error_type,
+                'heading': heading,
+                'processing_time': time.time() - start_time if 'start_time' in locals() else 0
             }
     
     def _parse_bullet_response(self, response_text: str, max_words: int) -> List[str]:
