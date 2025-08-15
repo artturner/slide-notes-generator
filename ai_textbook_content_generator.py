@@ -3,9 +3,17 @@
 import PyPDF2
 import re
 import time
+import os
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from grok_client import GrokClient
+
+try:
+    from striprtf.striprtf import rtf_to_text
+    RTF_AVAILABLE = True
+except ImportError:
+    RTF_AVAILABLE = False
+    print("Note: striprtf not available. Install striprtf for RTF support.")
 
 try:
     from gemini_client import GeminiClient
@@ -109,6 +117,47 @@ class AITextbookContentGenerator:
             print(f"Error extracting PDF text: {e}")
             return ""
     
+    def extract_rtf_text(self, rtf_path: str) -> str:
+        """Extract text from RTF file with style information preserved"""
+        if not RTF_AVAILABLE:
+            print("Error: striprtf library not available. Install with: pip install striprtf")
+            return ""
+        
+        try:
+            with open(rtf_path, 'r', encoding='utf-8') as file:
+                rtf_content = file.read()
+            
+            # Extract plain text while preserving some structure
+            plain_text = rtf_to_text(rtf_content)
+            
+            # Also extract raw RTF for heading detection
+            self._raw_rtf_content = rtf_content
+            
+            return plain_text
+        except Exception as e:
+            print(f"Error extracting RTF text: {e}")
+            return ""
+    
+    def detect_file_type(self, file_path: str) -> str:
+        """Detect if file is PDF or RTF based on extension"""
+        file_ext = os.path.splitext(file_path)[1].lower()
+        if file_ext == '.pdf':
+            return 'pdf'
+        elif file_ext == '.rtf':
+            return 'rtf'
+        else:
+            # Try to detect by content
+            try:
+                with open(file_path, 'rb') as f:
+                    header = f.read(10)
+                    if header.startswith(b'%PDF'):
+                        return 'pdf'
+                    elif header.startswith(b'{\\rtf'):
+                        return 'rtf'
+            except:
+                pass
+            return 'unknown'
+    
     def load_headings_from_file(self, headings_path: str) -> List[str]:
         """Load headings from text file"""
         try:
@@ -171,6 +220,10 @@ class AITextbookContentGenerator:
         """Find the index of a heading in the text lines"""
         heading_clean = self._clean_heading_for_matching(heading)
         
+        # Check if we have RTF content for better heading detection
+        if hasattr(self, '_raw_rtf_content') and self._raw_rtf_content:
+            return self._find_heading_in_rtf(text_lines, heading, start_idx)
+        
         for i in range(start_idx, len(text_lines)):
             line = text_lines[i].strip()
             line_clean = self._clean_heading_for_matching(line)
@@ -207,6 +260,65 @@ class AITextbookContentGenerator:
         
         return -1
     
+    def _find_heading_in_rtf(self, text_lines: List[str], heading: str, start_idx: int = 0) -> int:
+        """Find heading in RTF content using style information"""
+        heading_clean = self._clean_heading_for_matching(heading)
+        
+        # Split RTF content into lines to match with text_lines
+        rtf_lines = self._raw_rtf_content.split('\n')
+        
+        # Common RTF heading style patterns
+        heading_patterns = [
+            r'\\s1\\',  # Heading 1 style
+            r'\\s2\\',  # Heading 2 style
+            r'\\s3\\',  # Heading 3 style
+            r'\\outlinelevel0\\',  # Outline level 0 (top level)
+            r'\\outlinelevel1\\',  # Outline level 1
+            r'\\b\\',   # Bold text (often headings)
+            r'\\fs\d{3,}\\',  # Large font size (24pt+ indicates heading)
+        ]
+        
+        for i in range(start_idx, len(text_lines)):
+            line = text_lines[i].strip()
+            line_clean = self._clean_heading_for_matching(line)
+            
+            # Skip empty lines
+            if not line:
+                continue
+            
+            # Check if this line matches our heading
+            if heading_clean in line_clean:
+                # Look for corresponding RTF formatting around this text
+                text_in_rtf = self._find_text_in_rtf(line, rtf_lines)
+                
+                if text_in_rtf:
+                    # Check if the RTF context has heading-style formatting
+                    for pattern in heading_patterns:
+                        if re.search(pattern, text_in_rtf, re.IGNORECASE):
+                            print(f"DEBUG: RTF heading match for '{heading}' at line {i}: '{line}' (style: {pattern})")
+                            return i
+                
+                # If exact match, still consider it even without RTF style
+                if line_clean == heading_clean:
+                    print(f"DEBUG: RTF exact match for '{heading}' at line {i}: '{line}'")
+                    return i
+        
+        return -1
+    
+    def _find_text_in_rtf(self, text: str, rtf_lines: List[str]) -> str:
+        """Find the RTF context around a specific text"""
+        text_words = text.lower().split()[:3]  # Use first 3 words for matching
+        
+        for i, rtf_line in enumerate(rtf_lines):
+            rtf_lower = rtf_line.lower()
+            if all(word in rtf_lower for word in text_words):
+                # Return context: current line + previous + next
+                start = max(0, i - 1)
+                end = min(len(rtf_lines), i + 2)
+                return '\n'.join(rtf_lines[start:end])
+        
+        return ""
+    
     def _clean_heading_for_matching(self, heading: str) -> str:
         """Clean heading text for better matching"""
         # Remove special characters, normalize whitespace
@@ -218,9 +330,14 @@ class AITextbookContentGenerator:
         """Check if a line looks like a heading"""
         line_clean = self._clean_heading_for_matching(line)
         
+        # Only exact matches or very short lines should be considered headings
         for heading in known_headings:
             heading_clean = self._clean_heading_for_matching(heading)
-            if line_clean == heading_clean or heading_clean in line_clean:
+            # Exact match
+            if line_clean == heading_clean:
+                return True
+            # Only consider partial matches for very short lines (likely actual headings)
+            if len(line.strip()) < 30 and heading_clean in line_clean:
                 return True
         
         return False
@@ -423,19 +540,28 @@ Example format:
         
         return bullets[:self.MAX_BULLETS_PER_SECTION]
     
-    def generate_content_from_pdf_and_headings(self, pdf_path: str, headings_path: str, 
+    def generate_content_from_file_and_headings(self, file_path: str, headings_path: str, 
                                               output_path: str) -> Dict[str, Any]:
         """
-        Main method to generate AI-enhanced bullet point content from PDF and headings file.
+        Main method to generate AI-enhanced bullet point content from PDF/RTF and headings file.
         """
         start_time = datetime.now()
         
         try:
-            # Load inputs
-            print("Extracting PDF text...")
-            pdf_text = self.extract_pdf_text(pdf_path)
-            if not pdf_text:
-                return {'success': False, 'error': 'Failed to extract PDF text'}
+            # Detect file type and extract text accordingly
+            file_type = self.detect_file_type(file_path)
+            
+            if file_type == 'pdf':
+                print("Extracting PDF text...")
+                text_content = self.extract_pdf_text(file_path)
+            elif file_type == 'rtf':
+                print("Extracting RTF text...")
+                text_content = self.extract_rtf_text(file_path)
+            else:
+                return {'success': False, 'error': f'Unsupported file type: {file_type}. Use PDF or RTF files.'}
+            
+            if not text_content:
+                return {'success': False, 'error': f'Failed to extract text from {file_type.upper()} file'}
             
             print("Loading headings...")
             headings = self.load_headings_from_file(headings_path)
@@ -446,7 +572,7 @@ Example format:
             
             # Extract sections
             print("Extracting section content...")
-            sections = self.extract_section_content(pdf_text, headings)
+            sections = self.extract_section_content(text_content, headings)
             
             if not sections:
                 return {'success': False, 'error': 'No sections could be extracted'}
@@ -476,7 +602,7 @@ Example format:
             
             # Create markdown output
             print("Creating markdown output...")
-            markdown_content = self._create_markdown_output(results, pdf_path, headings_path)
+            markdown_content = self._create_markdown_output(results, file_path, headings_path, file_type)
             
             # Save to file
             with open(output_path, 'w', encoding='utf-8') as f:
@@ -491,8 +617,10 @@ Example format:
                 'total_bullets': total_bullets,
                 'processing_time': str(processing_time).split('.')[0],
                 'ai_method': 'openai' if self.use_openai else ('gemini' if self.use_gemini else ('grok' if self.use_grok else 'fallback')),
+                'file_type': file_type,
                 'metadata': {
-                    'pdf_file': pdf_path,
+                    'source_file': file_path,
+                    'file_type': file_type,
                     'headings_file': headings_path,
                     'generated_at': start_time.strftime('%Y-%m-%d %H:%M:%S'),
                     'sections': list(results.keys())
@@ -506,19 +634,21 @@ Example format:
                 'processing_time': str(datetime.now() - start_time).split('.')[0]
             }
     
-    def _create_markdown_output(self, results: Dict[str, Dict], pdf_path: str, headings_path: str) -> str:
+    def _create_markdown_output(self, results: Dict[str, Dict], file_path: str, headings_path: str, file_type: str = 'pdf') -> str:
         """Create formatted markdown output"""
         content = []
         
         # Header
         content.append("# AI-Generated Textbook Chapter Notes\n")
-        content.append(f"**PDF Source:** {pdf_path}")
+        content.append(f"**Source File:** {file_path} ({file_type.upper()})")
         content.append(f"**Headings Source:** {headings_path}")
         content.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         ai_method = 'OpenAI API' if self.use_openai else ('Gemini API' if self.use_gemini else ('Grok API' if self.use_grok else 'Rule-based fallback'))
         content.append(f"**AI Method:** {ai_method}")
         content.append(f"**Total Sections:** {len(results)}")
         content.append(f"**Total Bullets:** {sum(data['bullet_count'] for data in results.values())}")
+        if file_type == 'rtf':
+            content.append(f"**Note:** RTF format used for enhanced heading detection")
         content.append("")
         
         # Sections
@@ -544,25 +674,25 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description='Generate AI-enhanced bullet points from PDF textbook chapters',
+        description='Generate AI-enhanced bullet points from PDF or RTF textbook chapters',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Generate with Gemini AI (requires GOOGLE_API_KEY environment variable)
-  %(prog)s chapter.pdf headings.txt output.md --use-gemini
+  # Generate with OpenAI (requires OPENAI_API_KEY environment variable)
+  %(prog)s chapter.pdf headings.txt output.md --use-openai
   
-  # Generate with Grok AI (requires XAI_API_KEY environment variable)
-  %(prog)s chapter.pdf headings.txt output.md --use-grok
+  # Generate from RTF file with Grok AI (requires XAI_API_KEY environment variable)
+  %(prog)s chapter.rtf headings.txt output.md --use-grok
   
   # Generate with fallback method
   %(prog)s chapter.pdf headings.txt output.md
   
   # Generate with custom models
-  %(prog)s chapter.pdf headings.txt output.md --use-gemini --gemini-model gemini-1.5-pro
+  %(prog)s chapter.rtf headings.txt output.md --use-gemini --gemini-model gemini-1.5-pro
         """
     )
     
-    parser.add_argument('pdf_path', help='Path to PDF textbook chapter')
+    parser.add_argument('file_path', help='Path to PDF or RTF textbook chapter')
     parser.add_argument('headings_path', help='Path to text file containing headings (one per line)')
     parser.add_argument('output_path', help='Path for output markdown file')
     parser.add_argument('--use-gemini', action='store_true', help='Use Gemini AI for bullet generation (recommended)')
@@ -591,8 +721,8 @@ Examples:
     )
     
     # Generate content
-    result = generator.generate_content_from_pdf_and_headings(
-        args.pdf_path, 
+    result = generator.generate_content_from_file_and_headings(
+        args.file_path, 
         args.headings_path, 
         args.output_path
     )
