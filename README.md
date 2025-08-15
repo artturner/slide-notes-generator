@@ -5,7 +5,7 @@ An automated tool that generates comprehensive, content-aligned notes for PowerP
 ## Features
 
 - **Automatic Slide Extraction**: Extracts content, titles, bullet points, and speaker notes from PowerPoint presentations
-- **Textbook Content Parsing**: Supports PDF, DOCX, and TXT textbook formats with intelligent section detection
+- **Textbook Content Parsing**: Supports PDF, RTF, DOCX, and TXT textbook formats with intelligent section detection
 - **Content Alignment**: Uses TF-IDF vectorization and cosine similarity to match slides with relevant textbook sections
 - **Intelligent Notes Generation**: Creates structured notes with:
   - Content overviews
@@ -70,7 +70,7 @@ usage: main.py [-h] [-o OUTPUT] [-f {markdown,html,json,txt,csv}]
 
 positional arguments:
   presentation          Path to PowerPoint presentation file (.pptx or .ppt)
-  textbook             Path to textbook file (.pdf, .docx, or .txt)
+  textbook             Path to textbook file (.pdf, .rtf, .docx, or .txt)
 
 optional arguments:
   -h, --help           show this help message and exit
@@ -93,10 +93,11 @@ optional arguments:
 - Maintains slide order and numbering
 
 ### 2. Textbook Parsing
-- Supports multiple formats (PDF, DOCX, TXT)
+- Supports multiple formats (PDF, RTF, DOCX, TXT)
 - Automatically detects section headers and structure
 - Extracts key terms and concepts
 - Creates searchable content sections
+- Enhanced RTF parsing with style-aware heading detection
 
 ### 3. Content Alignment
 - Uses TF-IDF vectorization for semantic analysis
@@ -212,9 +213,10 @@ python main.py --check-deps
    - Try re-saving the PowerPoint file
 
 2. **"Failed to load textbook content"**
-   - Verify textbook file format (PDF, DOCX, TXT)
+   - Verify textbook file format (PDF, RTF, DOCX, TXT)
    - Check for password-protected files
    - Ensure file is not corrupted
+   - For RTF files, ensure striprtf package is installed: `pip install striprtf`
 
 3. **Low alignment rates**
    - Ensure textbook content is relevant to slides
@@ -256,6 +258,29 @@ python main.py research_findings.pptx research_paper.pdf -o findings.json -f jso
 - **Handwriting**: Handwritten content in PDFs may not be extracted
 - **Protected Files**: Password-protected files are not supported
 - **Presentation Animations**: Animation content is not captured
+
+## Additional Tools
+
+### Markdown to PowerPoint Converter
+
+Convert bullet point markdown files to PowerPoint presentations:
+
+```bash
+python markdown_to_powerpoint.py <input_file> [-o <output_file>]
+```
+
+- `<input_file>`: Required markdown file with bullet points (## headers become slide titles)
+- `-o, --output <output_file>`: Optional output PowerPoint file name (defaults to input_file.pptx)
+
+### AI Textbook Content Generator
+
+Generate enhanced bullet points from textbook chapters:
+
+```bash
+python ai_textbook_content_generator.py chapter.pdf headings.txt output.md [--use-openai|--use-grok|--use-gemini]
+```
+
+Supports PDF and RTF textbook formats with AI-enhanced content generation.
 
 ## Future Enhancements
 
