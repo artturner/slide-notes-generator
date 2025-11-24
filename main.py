@@ -18,7 +18,7 @@ from pptx_content_writer import PowerPointContentWriter
 from slide_content_formatter import SlideContentFormatter
 
 class SlideNotesGenerator:
-    def __init__(self, verbose: bool = False, use_grok: bool = False, grok_api_key: str = None, grok_model: str = "grok-beta"):
+    def __init__(self, verbose: bool = False, use_grok: bool = False, grok_api_key: str = None, grok_model: str = "grok-3"):
         self.verbose = verbose
         self.use_grok = use_grok
         self.error_handler = ErrorHandler()
@@ -447,8 +447,8 @@ Examples:
                        help='xAI Grok API key (or set XAI_API_KEY env var)')
     
     parser.add_argument('--grok-model',
-                       default='grok-beta',
-                       help='Grok model to use (default: grok-beta)')
+                       default='grok-3',
+                       help='Grok model to use (default: grok-3)')
     
     parser.add_argument('--write-to-pptx',
                        action='store_true',
