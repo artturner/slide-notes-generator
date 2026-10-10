@@ -272,6 +272,41 @@ python markdown_to_powerpoint.py <input_file> [-o <output_file>]
 - `<input_file>`: Required markdown file with bullet points (## headers become slide titles)
 - `-o, --output <output_file>`: Optional output PowerPoint file name (defaults to input_file.pptx)
 
+### Sellnow Markdown to PowerPoint Converter
+
+Convert specially formatted Sellnow markdown files to PowerPoint presentations:
+
+```bash
+python sellnow_md_to_pptx.py <input_file> [-o <output_file>]
+```
+
+- `<input_file>`: Required Sellnow-formatted markdown file
+- `-o, --output <output_file>`: Optional output PowerPoint file name (defaults to input_file.pptx)
+
+The Sellnow format includes structured sections for each slide:
+- **Type**: Slide type (Title Slide, Content Slide, Section/Unit Slide)
+- **Title**: Slide title
+- **Body**: Main content with bullets and formatting
+- **Speaker Notes**: Presenter notes
+- **Accessibility**: Alt text and accessibility information
+
+### PowerPoint to Sellnow Markdown Converter
+
+Convert PowerPoint presentations back to Sellnow-formatted markdown:
+
+```bash
+python pptx_to_sellnow_md.py <input_file> [-o <output_file>]
+```
+
+- `<input_file>`: Required PowerPoint file (.pptx)
+- `-o, --output <output_file>`: Optional output markdown file name (defaults to input_file.md)
+
+This tool extracts:
+- Slide types (automatically detected based on layout)
+- Titles and body content with proper bullet formatting
+- Speaker notes
+- Auto-generated accessibility descriptions
+
 ### AI Textbook Content Generator
 
 Generate enhanced bullet points from textbook chapters:

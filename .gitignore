@@ -95,3 +95,12 @@ temp_*
 output/
 generated/
 exports/
+
+# Local only: chat transcripts / student data / textbook-derived content
+Sellnow_*.md
+sellnow_*.md
+Chapter*_notes.md
+2025-08-12-we-have-created-a-program-aitextbookcontentgene.txt
+bulletpoints.txt
+sellnow additions.txt
+*.aux
